@@ -17,6 +17,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
+import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
@@ -37,26 +38,20 @@ class SpeedMonitorService : Service() {
     private lateinit var fusedClient: FusedLocationProviderClient
     private lateinit var prefs: android.content.SharedPreferences
 
-    // Mốc coi là "đang di chuyển" (km/h) - xác nhận đã từng chạy đủ nhanh trước khi xét trigger
     private val movingThreshold = 15f
-
-    // Sàn tối thiểu - dưới mức này coi là đứng yên hẳn, không trigger dù ngưỡng người dùng đặt bao nhiêu
     private val minTriggerSpeed = 1f
 
     private val requiredBelowReadings = 2
     private var belowCount = 0
     private var isMoving = false
 
-    // ---- Pause/Resume thủ công qua nút nổi ----
     private var isPaused = false
 
-    // ---- Tiết kiệm pin khi đỗ xe lâu ----
     private val parkTimeoutMs = 5 * 60 * 1000L
     private val parkSpeedThreshold = 2f
     private var stoppedSinceMs: Long = 0L
     private var isPowerSaveMode = false
 
-    // ---- Nút nổi ----
     private var windowManager: WindowManager? = null
     private var floatingView: View? = null
 
@@ -68,8 +63,6 @@ class SpeedMonitorService : Service() {
             val speedKmh = location.speed * 3.6f
             val userThreshold = prefs.getFloat("threshold", 5f)
             val targetPkg = prefs.getString("target_package", null)
-
-            Log.d("SpeedMonitor", "Speed=$speedKmh moving=$isMoving paused=$isPaused powerSave=$isPowerSaveMode")
 
             handleParkingPowerSave(speedKmh, SystemClock.elapsedRealtime())
             handleFloatingButtonVisibility(speedKmh)
@@ -93,15 +86,10 @@ class SpeedMonitorService : Service() {
     }
 
     /**
-     * Logic chính:
-     * - Sàn tối thiểu: tốc độ <= 1km/h coi là đứng yên hẳn -> không trigger.
-     * - Đỗ xe (power-save mode): tắt hẳn trigger.
-     * - Đang Pause thủ công: tắt hẳn trigger, chỉ tự Resume khi tốc độ vượt lại 15km/h.
-     * - App đích đang hiển thị: không mở lại (check qua UsageStatsManager).
+     * Logic chính + phát broadcast trạng thái debug ra cho MainActivity hiển thị
+     * (chỉ có tác dụng khi MainActivity đang mở, không ảnh hưởng gì tới hoạt động nền).
      */
     private fun handleTriggerLogic(speedKmh: Float, userThreshold: Float, targetPkg: String?) {
-        if (targetPkg == null) return
-
         if (speedKmh > movingThreshold) {
             isMoving = true
             if (isPaused) {
@@ -111,26 +99,57 @@ class SpeedMonitorService : Service() {
             }
         }
 
-        if (!isMoving || isPaused || isPowerSaveMode) {
+        val condMoving = isMoving
+        val condInZone = speedKmh > minTriggerSpeed && speedKmh <= userThreshold
+        val condNotPaused = !isPaused
+        val condNotPowerSave = !isPowerSaveMode
+        val appForeground = targetPkg?.let { isTargetAppInForeground(it) } ?: false
+        val allConditionsMet = condMoving && condInZone && condNotPaused && condNotPowerSave
+
+        broadcastStatus(
+            speedKmh = speedKmh,
+            condMoving = condMoving,
+            condInZone = condInZone,
+            condNotPaused = condNotPaused,
+            condNotPowerSave = condNotPowerSave,
+            appForeground = appForeground,
+            allConditionsMet = allConditionsMet
+        )
+
+        if (targetPkg == null || !allConditionsMet) {
             belowCount = 0
             return
         }
 
-        if (speedKmh <= minTriggerSpeed) {
-            belowCount = 0 // đứng yên hẳn -> không trigger
-            return
-        }
-
-        if (speedKmh <= userThreshold) {
-            belowCount++
-            if (belowCount >= requiredBelowReadings) {
-                if (!isTargetAppInForeground(targetPkg)) {
-                    launchTargetApp(targetPkg)
-                }
+        belowCount++
+        if (belowCount >= requiredBelowReadings) {
+            if (!appForeground) {
+                launchTargetApp(targetPkg)
             }
-        } else {
-            belowCount = 0
         }
+    }
+
+    private fun broadcastStatus(
+        speedKmh: Float,
+        condMoving: Boolean,
+        condInZone: Boolean,
+        condNotPaused: Boolean,
+        condNotPowerSave: Boolean,
+        appForeground: Boolean,
+        allConditionsMet: Boolean
+    ) {
+        val intent = Intent(ACTION_STATUS_UPDATE).apply {
+            setPackage(packageName)
+            putExtra(EXTRA_SPEED, speedKmh)
+            putExtra(EXTRA_COND_MOVING, condMoving)
+            putExtra(EXTRA_COND_IN_ZONE, condInZone)
+            putExtra(EXTRA_COND_NOT_PAUSED, condNotPaused)
+            putExtra(EXTRA_COND_NOT_POWERSAVE, condNotPowerSave)
+            putExtra(EXTRA_APP_FOREGROUND, appForeground)
+            putExtra(EXTRA_ALL_MET, allConditionsMet)
+            putExtra(EXTRA_IS_POWERSAVE_MODE, isPowerSaveMode)
+        }
+        sendBroadcast(intent)
     }
 
     private fun isTargetAppInForeground(pkg: String): Boolean {
@@ -164,6 +183,10 @@ class SpeedMonitorService : Service() {
         }
     }
 
+    private fun dpToPx(dp: Int): Int {
+        return (dp * resources.displayMetrics.density).toInt()
+    }
+
     private fun showFloatingButton() {
         if (floatingView != null) return
         if (!Settings.canDrawOverlays(this)) return
@@ -182,16 +205,24 @@ class SpeedMonitorService : Service() {
             WindowManager.LayoutParams.TYPE_PHONE
         }
 
+        // QUAN TRỌNG: ép kích thước cụ thể bằng pixel (56dp quy đổi ra px) thay vì
+        // WRAP_CONTENT. Lý do: khi inflate view với parent=null rồi add vào
+        // WindowManager, thuộc tính layout_width/height khai báo trong XML không
+        // được áp dụng đúng cách để tự "wrap" kích thước - dẫn tới các view con
+        // dùng match_parent bị phồng to gần hết màn hình. Đặt cứng kích thước ở
+        // đây đảm bảo nút luôn đúng 56dp x 56dp bất kể thiết bị.
+        val sizePx = dpToPx(52)
+
         val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
+            sizePx,
+            sizePx,
             windowType,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
         )
 
         val displayMetrics = resources.displayMetrics
-        params.gravity = android.view.Gravity.TOP or android.view.Gravity.START
+        params.gravity = Gravity.TOP or Gravity.START
         params.x = prefs.getInt("btn_x", 50)
         params.y = prefs.getInt("btn_y", displayMetrics.heightPixels - 300)
 
@@ -263,13 +294,13 @@ class SpeedMonitorService : Service() {
 
     private fun updateButtonIcon() {
         val icon = floatingView?.findViewById<ImageView>(R.id.btnIcon)
-        val bg = floatingView?.findViewById<View>(R.id.btnBackground)
+        val dot = floatingView?.findViewById<View>(R.id.statusDot)
         if (isPaused) {
             icon?.setImageResource(android.R.drawable.ic_media_play)
-            (bg?.background as? GradientDrawable)?.setColor(0xFFFF9800.toInt())
+            (dot?.background as? GradientDrawable)?.setColor(0xFFFF5252.toInt()) // đỏ - đang Pause
         } else {
             icon?.setImageResource(android.R.drawable.ic_media_pause)
-            (bg?.background as? GradientDrawable)?.setColor(0xFF4CAF50.toInt())
+            (dot?.background as? GradientDrawable)?.setColor(0xFF4CAF50.toInt()) // xanh - đang hoạt động
         }
     }
 
@@ -373,5 +404,15 @@ class SpeedMonitorService : Service() {
 
     companion object {
         private const val NOTIFICATION_ID = 1
+
+        const val ACTION_STATUS_UPDATE = "com.example.speedmonitor.STATUS_UPDATE"
+        const val EXTRA_SPEED = "extra_speed"
+        const val EXTRA_COND_MOVING = "extra_cond_moving"
+        const val EXTRA_COND_IN_ZONE = "extra_cond_in_zone"
+        const val EXTRA_COND_NOT_PAUSED = "extra_cond_not_paused"
+        const val EXTRA_COND_NOT_POWERSAVE = "extra_cond_not_powersave"
+        const val EXTRA_APP_FOREGROUND = "extra_app_foreground"
+        const val EXTRA_ALL_MET = "extra_all_met"
+        const val EXTRA_IS_POWERSAVE_MODE = "extra_is_powersave_mode"
     }
 }

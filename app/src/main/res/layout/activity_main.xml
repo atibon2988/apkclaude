@@ -68,4 +68,69 @@
         android:layout_weight="1"
         android:layout_marginTop="4dp" />
 
+    <!-- ==================== KHU VỰC DEBUG - TRẠNG THÁI THỰC TẾ ==================== -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="#1A000000"
+        android:padding="10dp"
+        android:layout_marginTop="8dp">
+
+        <TextView
+            android:id="@+id/tvDebugSpeed"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Tốc độ GPS hiện tại: -- km/h"
+            android:textStyle="bold"
+            android:textSize="15sp" />
+
+        <TextView
+            android:id="@+id/tvDebugCarState"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Trạng thái xe: chưa bắt đầu"
+            android:layout_marginTop="2dp"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/tvDebugCond1"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="1. Đã từng chạy &gt;15km/h: --"
+            android:layout_marginTop="6dp"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/tvDebugCond2"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="2. Tốc độ trong vùng kích hoạt: --"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/tvDebugCond3"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="3. Không bị Pause: --"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/tvDebugCond4"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="4. App đích không hiển thị: --"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/tvDebugTrigger"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Trạng thái trigger tổng thể: --"
+            android:textStyle="bold"
+            android:textSize="14sp"
+            android:layout_marginTop="6dp" />
+
+    </LinearLayout>
+
 </LinearLayout>

@@ -28,6 +28,8 @@ App theo dõi tốc độ qua GPS, tự động mở 1 app khác khi tốc độ
   2. **"Usage access"** — để check cam có đang hiển thị hay không.
   
   Khi bấm "Bắt đầu" lần đầu, app sẽ tự mở lần lượt 2 màn hình Settings tương ứng — bạn tìm "Speed Monitor" trong danh sách, bật lên, quay lại app, bấm "Bắt đầu" lại cho tới khi cả 2 quyền đã được cấp.
+- **Khu vực Debug** ở cuối màn hình chính: hiển thị tốc độ GPS hiện tại, trạng thái xe (đứng yên/di chuyển/đã đỗ), và 4 điều kiện trigger (đạt/chưa đạt từng điều kiện + trạng thái tổng thể) — cập nhật theo thời gian thực khi app đang mở, giúp debug dễ hơn khi lái thử thực tế. Cơ chế: Service gửi broadcast nội bộ (`sendBroadcast` + `setPackage`) mỗi lần đọc GPS, MainActivity lắng nghe khi đang ở foreground (`onStart`/`onStop`) — không ảnh hưởng gì tới hoạt động nền khi app bị đóng.
+- **Đã sửa lỗi kích thước nút nổi**: bản trước bị lỗi hiển thị to bất thường (gần hết màn hình) do cách đo kích thước `WRAP_CONTENT` khi thêm view vào `WindowManager` bị sai lệch. Bản này ép kích thước cứng 56dp bằng pixel cụ thể, đảm bảo đúng kích thước trên mọi thiết bị.
 
 ## Cấu trúc project
 

@@ -2,7 +2,10 @@ package com.example.speedmonitor
 
 import android.Manifest
 import android.app.AppOpsManager
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -10,6 +13,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.EditText
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -29,6 +33,29 @@ class MainActivity : AppCompatActivity() {
     private lateinit var edtThreshold: EditText
     private lateinit var edtInterval: EditText
     private lateinit var recyclerApps: RecyclerView
+
+    private lateinit var tvDebugSpeed: TextView
+    private lateinit var tvDebugCarState: TextView
+    private lateinit var tvDebugCond1: TextView
+    private lateinit var tvDebugCond2: TextView
+    private lateinit var tvDebugCond3: TextView
+    private lateinit var tvDebugCond4: TextView
+    private lateinit var tvDebugTrigger: TextView
+
+    private val statusReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val speed = intent.getFloatExtra(SpeedMonitorService.EXTRA_SPEED, 0f)
+            val condMoving = intent.getBooleanExtra(SpeedMonitorService.EXTRA_COND_MOVING, false)
+            val condInZone = intent.getBooleanExtra(SpeedMonitorService.EXTRA_COND_IN_ZONE, false)
+            val condNotPaused = intent.getBooleanExtra(SpeedMonitorService.EXTRA_COND_NOT_PAUSED, true)
+            val condNotPowerSave = intent.getBooleanExtra(SpeedMonitorService.EXTRA_COND_NOT_POWERSAVE, true)
+            val appForeground = intent.getBooleanExtra(SpeedMonitorService.EXTRA_APP_FOREGROUND, false)
+            val allMet = intent.getBooleanExtra(SpeedMonitorService.EXTRA_ALL_MET, false)
+            val isPowerSave = intent.getBooleanExtra(SpeedMonitorService.EXTRA_IS_POWERSAVE_MODE, false)
+
+            updateDebugUi(speed, condMoving, condInZone, condNotPaused, condNotPowerSave, appForeground, allMet, isPowerSave)
+        }
+    }
 
     // Xin quyền vị trí foreground trước
     private val requestForegroundLocation = registerForActivityResult(
@@ -72,6 +99,14 @@ class MainActivity : AppCompatActivity() {
         edtInterval = findViewById(R.id.edtInterval)
         recyclerApps = findViewById(R.id.recyclerApps)
 
+        tvDebugSpeed = findViewById(R.id.tvDebugSpeed)
+        tvDebugCarState = findViewById(R.id.tvDebugCarState)
+        tvDebugCond1 = findViewById(R.id.tvDebugCond1)
+        tvDebugCond2 = findViewById(R.id.tvDebugCond2)
+        tvDebugCond3 = findViewById(R.id.tvDebugCond3)
+        tvDebugCond4 = findViewById(R.id.tvDebugCond4)
+        tvDebugTrigger = findViewById(R.id.tvDebugTrigger)
+
         edtThreshold.setText(prefs.getFloat("threshold", 5f).toString())
         edtInterval.setText((prefs.getLong("interval_ms", 2000L) / 1000).toString())
         selectedPackage = prefs.getString("target_package", null)
@@ -100,6 +135,54 @@ class MainActivity : AppCompatActivity() {
             stopService(Intent(this, SpeedMonitorService::class.java))
             Toast.makeText(this, "Đã dừng theo dõi", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        val filter = IntentFilter(SpeedMonitorService.ACTION_STATUS_UPDATE)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(statusReceiver, filter, RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            registerReceiver(statusReceiver, filter)
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        try {
+            unregisterReceiver(statusReceiver)
+        } catch (e: IllegalArgumentException) {
+            // receiver chưa từng được đăng ký - bỏ qua an toàn
+        }
+    }
+
+    private fun updateDebugUi(
+        speedKmh: Float,
+        condMoving: Boolean,
+        condInZone: Boolean,
+        condNotPaused: Boolean,
+        condNotPowerSave: Boolean,
+        appForeground: Boolean,
+        allConditionsMet: Boolean,
+        isPowerSave: Boolean
+    ) {
+        tvDebugSpeed.text = "Tốc độ GPS hiện tại: ${"%.1f".format(speedKmh)} km/h"
+
+        val carState = when {
+            isPowerSave -> "Đã đỗ (đang tiết kiệm pin)"
+            speedKmh <= 1f -> "Đang đứng yên"
+            else -> "Đang di chuyển"
+        }
+        tvDebugCarState.text = "Trạng thái xe: $carState"
+
+        tvDebugCond1.text = "1. Đã từng chạy >15km/h: ${if (condMoving) "Đạt" else "Chưa đạt"}"
+        tvDebugCond2.text = "2. Tốc độ trong vùng kích hoạt: ${if (condInZone) "Đạt" else "Chưa đạt"}"
+        tvDebugCond3.text = "3. Không bị Pause: ${if (condNotPaused) "Đạt" else "Đang Pause"}"
+        tvDebugCond4.text = "4. App đích không hiển thị: ${if (!appForeground) "Đạt" else "Đang hiển thị"}"
+
+        tvDebugTrigger.text = "Trạng thái trigger tổng thể: ${if (allConditionsMet) "ĐẠT" else "CHƯA ĐẠT"}"
+        tvDebugTrigger.setTextColor(if (allConditionsMet) 0xFF2E7D32.toInt() else 0xFFE65100.toInt())
     }
 
     private fun loadApps() {
