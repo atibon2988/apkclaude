@@ -38,7 +38,7 @@ class SpeedMonitorService : Service() {
     private lateinit var fusedClient: FusedLocationProviderClient
     private lateinit var prefs: android.content.SharedPreferences
 
-    private val movingThreshold = 15f
+    // "Ngưỡng kích hoạt lại" giờ đọc từ SharedPreferences (mặc định 15km/h) thay vì cố định trong code
     private val minTriggerSpeed = 1f
 
     private val requiredBelowReadings = 2
@@ -62,11 +62,12 @@ class SpeedMonitorService : Service() {
 
             val speedKmh = location.speed * 3.6f
             val userThreshold = prefs.getFloat("threshold", 5f)
+            val movingThreshold = prefs.getFloat("moving_threshold", 15f)
             val targetPkg = prefs.getString("target_package", null)
 
             handleParkingPowerSave(speedKmh, SystemClock.elapsedRealtime())
             handleFloatingButtonVisibility(speedKmh)
-            handleTriggerLogic(speedKmh, userThreshold, targetPkg)
+            handleTriggerLogic(speedKmh, userThreshold, movingThreshold, targetPkg)
         }
     }
 
@@ -89,7 +90,7 @@ class SpeedMonitorService : Service() {
      * Logic chính + phát broadcast trạng thái debug ra cho MainActivity hiển thị
      * (chỉ có tác dụng khi MainActivity đang mở, không ảnh hưởng gì tới hoạt động nền).
      */
-    private fun handleTriggerLogic(speedKmh: Float, userThreshold: Float, targetPkg: String?) {
+    private fun handleTriggerLogic(speedKmh: Float, userThreshold: Float, movingThreshold: Float, targetPkg: String?) {
         if (speedKmh > movingThreshold) {
             isMoving = true
             if (isPaused) {

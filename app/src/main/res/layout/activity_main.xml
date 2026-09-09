@@ -6,36 +6,16 @@
     android:padding="16dp">
 
     <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Ngưỡng tốc độ tự mở app (km/h)"
-        android:textSize="14sp" />
-
-    <EditText
-        android:id="@+id/edtThreshold"
+        android:id="@+id/tvTargetApp"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:inputType="numberDecimal"
-        android:hint="Ví dụ: 5" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="Khoảng cập nhật GPS (giây, 1-10)"
+        android:text="Chưa chọn ứng dụng - vào Thiết lập để chọn"
         android:textSize="14sp" />
-
-    <EditText
-        android:id="@+id/edtInterval"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:inputType="number"
-        android:hint="Ví dụ: 2" />
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
+        android:layout_marginTop="12dp"
         android:orientation="horizontal">
 
         <Button
@@ -53,29 +33,22 @@
             android:text="Dừng" />
     </LinearLayout>
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:text="Chọn app sẽ tự mở khi xe chạy chậm:"
-        android:textSize="14sp"
-        android:textStyle="bold" />
-
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/recyclerApps"
+    <Button
+        android:id="@+id/btnSettings"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:layout_marginTop="4dp" />
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="⚙ Thiết lập" />
 
     <!-- ==================== KHU VỰC DEBUG - TRẠNG THÁI THỰC TẾ ==================== -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="0dp"
+        android:layout_weight="1"
         android:orientation="vertical"
         android:background="#1A000000"
         android:padding="10dp"
-        android:layout_marginTop="8dp">
+        android:layout_marginTop="16dp">
 
         <TextView
             android:id="@+id/tvDebugSpeed"
@@ -83,44 +56,47 @@
             android:layout_height="wrap_content"
             android:text="Tốc độ GPS hiện tại: -- km/h"
             android:textStyle="bold"
-            android:textSize="15sp" />
+            android:textSize="16sp" />
 
         <TextView
             android:id="@+id/tvDebugCarState"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Trạng thái xe: chưa bắt đầu"
-            android:layout_marginTop="2dp"
-            android:textSize="13sp" />
+            android:layout_marginTop="4dp"
+            android:textSize="14sp" />
 
         <TextView
             android:id="@+id/tvDebugCond1"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="1. Đã từng chạy &gt;15km/h: --"
-            android:layout_marginTop="6dp"
-            android:textSize="12sp" />
+            android:layout_marginTop="10dp"
+            android:textSize="13sp" />
 
         <TextView
             android:id="@+id/tvDebugCond2"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="2. Tốc độ trong vùng kích hoạt: --"
-            android:textSize="12sp" />
+            android:layout_marginTop="4dp"
+            android:textSize="13sp" />
 
         <TextView
             android:id="@+id/tvDebugCond3"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="3. Không bị Pause: --"
-            android:textSize="12sp" />
+            android:layout_marginTop="4dp"
+            android:textSize="13sp" />
 
         <TextView
             android:id="@+id/tvDebugCond4"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="4. App đích không hiển thị: --"
-            android:textSize="12sp" />
+            android:layout_marginTop="4dp"
+            android:textSize="13sp" />
 
         <TextView
             android:id="@+id/tvDebugTrigger"
@@ -128,8 +104,8 @@
             android:layout_height="wrap_content"
             android:text="Trạng thái trigger tổng thể: --"
             android:textStyle="bold"
-            android:textSize="14sp"
-            android:layout_marginTop="6dp" />
+            android:textSize="15sp"
+            android:layout_marginTop="10dp" />
 
     </LinearLayout>
 

@@ -37,6 +37,11 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".SettingsActivity"
+            android:exported="false"
+            android:label="Thiết lập" />
+
         <service
             android:name=".SpeedMonitorService"
             android:foregroundServiceType="location"

@@ -1,6 +1,7 @@
 package com.example.speedmonitor
 
 import android.Manifest
+import android.app.AlertDialog
 import android.app.AppOpsManager
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -12,27 +13,20 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
-import android.widget.EditText
+import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import androidx.lifecycle.lifecycleScope
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var prefs: SharedPreferences
-    private var selectedPackage: String? = null
 
-    private lateinit var edtThreshold: EditText
-    private lateinit var edtInterval: EditText
-    private lateinit var recyclerApps: RecyclerView
+    private lateinit var tvTargetApp: TextView
+    private lateinit var btnStart: Button
+    private lateinit var btnStop: Button
 
     private lateinit var tvDebugSpeed: TextView
     private lateinit var tvDebugCarState: TextView
@@ -41,6 +35,11 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvDebugCond3: TextView
     private lateinit var tvDebugCond4: TextView
     private lateinit var tvDebugTrigger: TextView
+
+    // true trong lúc đang đi qua từng bước xin quyền, để onResume() tự động
+    // tiếp tục bước tiếp theo khi quay lại từ màn hình Settings, không cần
+    // người dùng bấm "Bắt đầu" lại nhiều lần.
+    private var permissionFlowActive = false
 
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -57,37 +56,29 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Xin quyền vị trí foreground trước
     private val requestForegroundLocation = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { result ->
         if (result[Manifest.permission.ACCESS_FINE_LOCATION] == true) {
-            requestBackgroundLocationIfNeeded()
+            requestNextMissingPermission()
         } else {
+            permissionFlowActive = false
             Toast.makeText(this, "Cần quyền vị trí để hoạt động", Toast.LENGTH_LONG).show()
         }
     }
 
-    // Xin quyền vị trí nền (phải xin riêng, sau bước trên, theo yêu cầu của Android 10+)
     private val requestBackgroundLocation = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) {
-            requestNotificationIfNeeded()
-        } else {
-            Toast.makeText(
-                this,
-                "Không có quyền vị trí nền, app sẽ không hoạt động khi tắt màn hình",
-                Toast.LENGTH_LONG
-            ).show()
-            requestNotificationIfNeeded()
-        }
+    ) {
+        // Dù được cấp hay không cũng tiếp tục bước sau - nếu từ chối, service vẫn
+        // chạy được lúc app đang mở, chỉ hạn chế khi khóa máy (đã cảnh báo ở bước sau)
+        requestNextMissingPermission()
     }
 
     private val requestNotification = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) {
-        startSpeedService()
+        requestNextMissingPermission()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -95,9 +86,9 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         prefs = getSharedPreferences("settings", MODE_PRIVATE)
 
-        edtThreshold = findViewById(R.id.edtThreshold)
-        edtInterval = findViewById(R.id.edtInterval)
-        recyclerApps = findViewById(R.id.recyclerApps)
+        tvTargetApp = findViewById(R.id.tvTargetApp)
+        btnStart = findViewById(R.id.btnStart)
+        btnStop = findViewById(R.id.btnStop)
 
         tvDebugSpeed = findViewById(R.id.tvDebugSpeed)
         tvDebugCarState = findViewById(R.id.tvDebugCarState)
@@ -107,38 +98,32 @@ class MainActivity : AppCompatActivity() {
         tvDebugCond4 = findViewById(R.id.tvDebugCond4)
         tvDebugTrigger = findViewById(R.id.tvDebugTrigger)
 
-        edtThreshold.setText(prefs.getFloat("threshold", 5f).toString())
-        edtInterval.setText((prefs.getLong("interval_ms", 2000L) / 1000).toString())
-        selectedPackage = prefs.getString("target_package", null)
-
-        recyclerApps.layoutManager = LinearLayoutManager(this)
-        loadApps()
-
-        findViewById<android.widget.Button>(R.id.btnStart).setOnClickListener {
-            if (selectedPackage == null) {
-                Toast.makeText(this, "Chọn 1 app trong danh sách trước", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-            val threshold = edtThreshold.text.toString().toFloatOrNull() ?: 5f
-            val intervalSec = (edtInterval.text.toString().toIntOrNull() ?: 2).coerceIn(1, 10)
-
-            prefs.edit()
-                .putFloat("threshold", threshold)
-                .putLong("interval_ms", intervalSec * 1000L)
-                .putString("target_package", selectedPackage)
-                .apply()
-
-            checkPermissionsAndStart()
+        findViewById<Button>(R.id.btnSettings).setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
         }
 
-        findViewById<android.widget.Button>(R.id.btnStop).setOnClickListener {
+        btnStart.setOnClickListener {
+            if (prefs.getString("target_package", null) == null) {
+                Toast.makeText(this, "Vào Thiết lập để chọn app trước đã", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            if (allSpecialPermissionsGranted()) {
+                startSpeedService()
+            } else {
+                showPermissionExplanationDialog()
+            }
+        }
+
+        btnStop.setOnClickListener {
             stopService(Intent(this, SpeedMonitorService::class.java))
             Toast.makeText(this, "Đã dừng theo dõi", Toast.LENGTH_SHORT).show()
         }
     }
 
-    override fun onStart() {
-        super.onStart()
+    override fun onResume() {
+        super.onResume()
+        refreshTargetAppLabel()
+
         val filter = IntentFilter(SpeedMonitorService.ACTION_STATUS_UPDATE)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(statusReceiver, filter, RECEIVER_NOT_EXPORTED)
@@ -146,16 +131,143 @@ class MainActivity : AppCompatActivity() {
             @Suppress("UnspecifiedRegisterReceiverFlag")
             registerReceiver(statusReceiver, filter)
         }
+
+        // Vừa quay lại app (ví dụ từ màn hình Settings cấp quyền) và đang giữa
+        // luồng xin quyền -> tự động tiếp tục bước kế tiếp, không cần bấm Bắt đầu lại.
+        if (permissionFlowActive) {
+            requestNextMissingPermission()
+        }
     }
 
-    override fun onStop() {
-        super.onStop()
+    override fun onPause() {
+        super.onPause()
         try {
             unregisterReceiver(statusReceiver)
         } catch (e: IllegalArgumentException) {
-            // receiver chưa từng được đăng ký - bỏ qua an toàn
+            // chưa từng đăng ký - bỏ qua an toàn
         }
     }
+
+    private fun refreshTargetAppLabel() {
+        val label = prefs.getString("target_label", null)
+        tvTargetApp.text = if (label != null) {
+            "Ứng dụng đang theo dõi: $label"
+        } else {
+            "Chưa chọn ứng dụng - vào Thiết lập để chọn"
+        }
+    }
+
+    // ==================== LUỒNG XIN QUYỀN GỘP 1 LẦN ====================
+
+    private fun showPermissionExplanationDialog() {
+        AlertDialog.Builder(this)
+            .setTitle("Cần cấp một số quyền")
+            .setMessage(
+                "App cần các quyền sau để hoạt động đúng:\n\n" +
+                    "• Hiển thị trên ứng dụng khác (nút nổi)\n" +
+                    "• Usage access (tránh mở app lặp lại)\n" +
+                    "• Vị trí (GPS) - luôn cho phép\n" +
+                    "• Thông báo\n\n" +
+                    "Bấm Tiếp tục, các màn hình Cài đặt tương ứng sẽ lần lượt hiện ra - " +
+                    "bạn chỉ cần bật từng quyền rồi quay lại app, KHÔNG cần bấm Bắt đầu lại nhiều lần."
+            )
+            .setPositiveButton("Tiếp tục") { _, _ ->
+                permissionFlowActive = true
+                requestNextMissingPermission()
+            }
+            .setNegativeButton("Để sau", null)
+            .show()
+    }
+
+    private fun allSpecialPermissionsGranted(): Boolean {
+        val overlayOk = Settings.canDrawOverlays(this)
+        val usageOk = hasUsageAccess()
+        val fineOk = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val bgOk = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ContextCompat.checkSelfPermission(
+                this, Manifest.permission.ACCESS_BACKGROUND_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        } else true
+        val notifOk = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            ContextCompat.checkSelfPermission(
+                this, Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+        } else true
+        return overlayOk && usageOk && fineOk && bgOk && notifOk
+    }
+
+    /**
+     * Kiểm tra lần lượt từng quyền còn thiếu, xin đúng 1 quyền tại 1 thời điểm rồi return.
+     * Được gọi lại từ onResume() (khi quay lại từ Settings) hoặc từ callback của các
+     * runtime permission launcher ở trên - tạo thành 1 chuỗi tự động đi hết các bước.
+     */
+    private fun requestNextMissingPermission() {
+        if (!Settings.canDrawOverlays(this)) {
+            Toast.makeText(this, "Bật 'Hiển thị trên ứng dụng khác' cho Speed Monitor rồi quay lại", Toast.LENGTH_LONG).show()
+            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+            return
+        }
+
+        if (!hasUsageAccess()) {
+            Toast.makeText(this, "Bật 'Usage access' cho Speed Monitor rồi quay lại", Toast.LENGTH_LONG).show()
+            startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+            return
+        }
+
+        val fineGranted = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!fineGranted) {
+            requestForegroundLocation.launch(
+                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+            )
+            return
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val bgGranted = ContextCompat.checkSelfPermission(
+                this, Manifest.permission.ACCESS_BACKGROUND_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!bgGranted) {
+                requestBackgroundLocation.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                return
+            }
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val notifGranted = ContextCompat.checkSelfPermission(
+                this, Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!notifGranted) {
+                requestNotification.launch(Manifest.permission.POST_NOTIFICATIONS)
+                return
+            }
+        }
+
+        // Đủ hết quyền
+        permissionFlowActive = false
+        startSpeedService()
+    }
+
+    private fun hasUsageAccess(): Boolean {
+        val appOps = getSystemService(APP_OPS_SERVICE) as AppOpsManager
+        val mode = appOps.unsafeCheckOpNoThrow(
+            AppOpsManager.OPSTR_GET_USAGE_STATS,
+            android.os.Process.myUid(),
+            packageName
+        )
+        return mode == AppOpsManager.MODE_ALLOWED
+    }
+
+    private fun startSpeedService() {
+        val intent = Intent(this, SpeedMonitorService::class.java)
+        ContextCompat.startForegroundService(this, intent)
+        Toast.makeText(this, "Đã bắt đầu theo dõi tốc độ", Toast.LENGTH_SHORT).show()
+    }
+
+    // ==================== DEBUG UI ====================
 
     private fun updateDebugUi(
         speedKmh: Float,
@@ -176,116 +288,13 @@ class MainActivity : AppCompatActivity() {
         }
         tvDebugCarState.text = "Trạng thái xe: $carState"
 
-        tvDebugCond1.text = "1. Đã từng chạy >15km/h: ${if (condMoving) "Đạt" else "Chưa đạt"}"
+        val movingThreshold = prefs.getFloat("moving_threshold", 15f)
+        tvDebugCond1.text = "1. Đã từng chạy >${"%.0f".format(movingThreshold)}km/h: ${if (condMoving) "Đạt" else "Chưa đạt"}"
         tvDebugCond2.text = "2. Tốc độ trong vùng kích hoạt: ${if (condInZone) "Đạt" else "Chưa đạt"}"
         tvDebugCond3.text = "3. Không bị Pause: ${if (condNotPaused) "Đạt" else "Đang Pause"}"
         tvDebugCond4.text = "4. App đích không hiển thị: ${if (!appForeground) "Đạt" else "Đang hiển thị"}"
 
         tvDebugTrigger.text = "Trạng thái trigger tổng thể: ${if (allConditionsMet) "ĐẠT" else "CHƯA ĐẠT"}"
         tvDebugTrigger.setTextColor(if (allConditionsMet) 0xFF2E7D32.toInt() else 0xFFE65100.toInt())
-    }
-
-    private fun loadApps() {
-        lifecycleScope.launch {
-            val apps = withContext(Dispatchers.IO) { getAllLaunchableApps() }
-            recyclerApps.adapter = AppAdapter(apps, selectedPackage) { app ->
-                selectedPackage = app.packageName
-                prefs.edit().putString("target_package", app.packageName).apply()
-                Toast.makeText(this@MainActivity, "Đã chọn: ${app.label}", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    private fun getAllLaunchableApps(): List<AppInfo> {
-        val pm = packageManager
-        return pm.getInstalledApplications(PackageManager.GET_META_DATA)
-            .filter { pm.getLaunchIntentForPackage(it.packageName) != null }
-            .map {
-                AppInfo(
-                    packageName = it.packageName,
-                    label = it.loadLabel(pm).toString(),
-                    icon = it.loadIcon(pm)
-                )
-            }
-            .distinctBy { it.packageName }
-            .sortedBy { it.label.lowercase() }
-    }
-
-    private fun checkPermissionsAndStart() {
-        if (!Settings.canDrawOverlays(this)) {
-            Toast.makeText(
-                this,
-                "Cần bật quyền 'Hiển thị trên ứng dụng khác' để dùng nút Pause nổi. " +
-                    "Bật lên trong Settings sắp mở, rồi quay lại bấm Bắt đầu lần nữa.",
-                Toast.LENGTH_LONG
-            ).show()
-            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
-            return
-        }
-
-        if (!hasUsageAccess()) {
-            Toast.makeText(
-                this,
-                "Cần bật quyền 'Usage access' để tránh mở app lặp lại. " +
-                    "Ở màn hình Settings sắp mở, tìm 'Speed Monitor' và bật lên, rồi quay lại bấm Bắt đầu lần nữa.",
-                Toast.LENGTH_LONG
-            ).show()
-            startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
-            return
-        }
-
-        val fineGranted = ContextCompat.checkSelfPermission(
-            this, Manifest.permission.ACCESS_FINE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
-
-        if (!fineGranted) {
-            requestForegroundLocation.launch(
-                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
-            )
-        } else {
-            requestBackgroundLocationIfNeeded()
-        }
-    }
-
-    private fun requestBackgroundLocationIfNeeded() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val granted = ContextCompat.checkSelfPermission(
-                this, Manifest.permission.ACCESS_BACKGROUND_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED
-            if (!granted) {
-                requestBackgroundLocation.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
-                return
-            }
-        }
-        requestNotificationIfNeeded()
-    }
-
-    private fun requestNotificationIfNeeded() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val granted = ContextCompat.checkSelfPermission(
-                this, Manifest.permission.POST_NOTIFICATIONS
-            ) == PackageManager.PERMISSION_GRANTED
-            if (!granted) {
-                requestNotification.launch(Manifest.permission.POST_NOTIFICATIONS)
-                return
-            }
-        }
-        startSpeedService()
-    }
-
-    private fun hasUsageAccess(): Boolean {
-        val appOps = getSystemService(APP_OPS_SERVICE) as AppOpsManager
-        val mode = appOps.unsafeCheckOpNoThrow(
-            AppOpsManager.OPSTR_GET_USAGE_STATS,
-            android.os.Process.myUid(),
-            packageName
-        )
-        return mode == AppOpsManager.MODE_ALLOWED
-    }
-
-    private fun startSpeedService() {
-        val intent = Intent(this, SpeedMonitorService::class.java)
-        ContextCompat.startForegroundService(this, intent)
-        Toast.makeText(this, "Đã bắt đầu theo dõi tốc độ", Toast.LENGTH_SHORT).show()
     }
 }
