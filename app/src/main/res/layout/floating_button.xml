@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/floatingRoot"
+    android:layout_width="56dp"
+    android:layout_height="56dp">
+
+    <View
+        android:id="@+id/btnBackground"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@drawable/bg_floating_circle"
+        android:elevation="8dp" />
+
+    <ImageView
+        android:id="@+id/btnIcon"
+        android:layout_width="26dp"
+        android:layout_height="26dp"
+        android:layout_gravity="center"
+        android:src="@android:drawable/ic_media_pause"
+        app:tint="#FFFFFF" />
+
+</FrameLayout>
